@@ -3,24 +3,100 @@ import pandas as pd
 import ta
 import requests
 import time
+import os
+
+# ====================================
+# TELEGRAM
+# ====================================
 
 BOT_TOKEN = "8937864972:AAGOMsxZOG7s6bKVW1al93ahQcfWU3lUYUg"
 CHAT_ID = "1259162767"
+
+# ====================================
+# DANH SACH MA
+# ====================================
 
 hose_symbols = [
     "HPG","SSI","VCI","VND","HCM","MBB","TCB","VPB",
     "FPT","MWG","STB","SHB","CTG","VCB","BID","VIC",
     "VHM","VRE","DXG","DIG","NLG","PDR","KDH","GEX",
-    "REE","POW","GAS","PLX","DBC","DGC","KBC","ANV"
+    "REE","POW","GAS","PLX","DBC","DGC","KBC","ANV",
+    "ASM","CSV","CTR","DPM","DCM","EIB","EVF","FTS",
+    "GMD","HAG","HSG","IJC","KSB","LCG","MSN","NVL",
+    "OCB","PC1","PNJ","PVT","SBT","SCR","SZC","TPB",
+    "VCG","VHC","VIX","VOS"
 ]
+
+# ====================================
+# CAU HINH BATCH
+# ====================================
+
+BATCH_SIZE = 10
+STATE_FILE = "batch.txt"
+
+# ====================================
+# DOC VI TRI BATCH
+# ====================================
+
+if os.path.exists(STATE_FILE):
+
+    with open(STATE_FILE, "r") as f:
+        start_index = int(f.read())
+
+else:
+
+    start_index = 0
+
+end_index = start_index + BATCH_SIZE
+
+batch_symbols = hose_symbols[start_index:end_index]
+
+# RESET VE DAU
+if len(batch_symbols) == 0:
+
+    start_index = 0
+    end_index = BATCH_SIZE
+
+    batch_symbols = hose_symbols[start_index:end_index]
+
+# ====================================
+# GUI TELEGRAM BAT DAU
+# ====================================
+
+requests.post(
+    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+    data={
+        "chat_id": CHAT_ID,
+        "text": f"🚀 Scan batch {start_index} -> {end_index}"
+    }
+)
 
 signals = []
 
-for i, symbol in enumerate(hose_symbols):
+# ====================================
+# HAM RSI
+# ====================================
+
+def get_rsi(df):
+
+    close = pd.to_numeric(df["close"])
+
+    rsi = ta.momentum.RSIIndicator(
+        close=close,
+        window=14
+    ).rsi()
+
+    return round(rsi.iloc[-1], 2)
+
+# ====================================
+# QUET
+# ====================================
+
+for symbol in batch_symbols:
 
     try:
 
-        print(f"Scanning {symbol}")
+        print("Scanning:", symbol)
 
         stock = Vnstock().stock(
             symbol=symbol,
@@ -36,40 +112,54 @@ for i, symbol in enumerate(hose_symbols):
         if df is None or len(df) < 20:
             continue
 
-        close = pd.to_numeric(df["close"])
+        latest_rsi = get_rsi(df)
 
-        rsi = ta.momentum.RSIIndicator(
-            close=close,
-            window=14
-        ).rsi()
+        latest_price = round(
+            pd.to_numeric(df["close"]).iloc[-1],
+            2
+        )
 
-        latest_rsi = round(rsi.iloc[-1], 2)
+        print(symbol, latest_rsi)
 
+        # DIEU KIEN RSI
         if latest_rsi < 30:
 
-            latest_price = round(close.iloc[-1], 2)
-
             signals.append(
-                f"{symbol} | Gia: {latest_price} | RSI14: {latest_rsi}"
+                f"🟢 {symbol}\n"
+                f"Gia: {latest_price}\n"
+                f"RSI14: {latest_rsi}\n"
             )
 
-        # chống limit
-        time.sleep(5)
+        # CHONG LIMIT
+        time.sleep(4)
 
     except Exception as e:
 
         print(symbol, e)
 
-        # nghỉ lâu hơn nếu lỗi
-        time.sleep(10)
+        time.sleep(6)
+
+# ====================================
+# TAO NOI DUNG
+# ====================================
 
 if signals:
 
-    message = "📉 RSI14 < 30\n\n" + "\n".join(signals)
+    message = (
+        f"📉 Batch {start_index} -> {end_index}\n\n"
+        + "\n".join(signals)
+    )
 
 else:
 
-    message = "❌ Khong co ma RSI14 < 30"
+    message = (
+        f"❌ Batch {start_index} -> {end_index}\n"
+        f"Khong co ma RSI14 < 30"
+    )
+
+# ====================================
+# GUI TELEGRAM
+# ====================================
 
 requests.post(
     f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
@@ -79,4 +169,18 @@ requests.post(
     }
 )
 
-print(message)
+# ====================================
+# LUU BATCH TIEP
+# ====================================
+
+next_index = end_index
+
+if next_index >= len(hose_symbols):
+
+    next_index = 0
+
+with open(STATE_FILE, "w") as f:
+
+    f.write(str(next_index))
+
+print("DONE")
