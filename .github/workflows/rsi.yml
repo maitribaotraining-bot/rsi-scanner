@@ -1,4 +1,3 @@
-```yaml id="n2p8la"
 name: RSI Scanner
 
 on:
@@ -22,4 +21,3 @@ jobs:
 
       - name: Run python main.py
         run: python main.py
-```
