@@ -1,14 +1,13 @@
-name: RSI
+name: test
 
-on: workflow_dispatch
+on:
+workflow_dispatch:
 
 jobs:
-scan:
+test:
 runs-on: ubuntu-latest
 
 ```
 steps:
-  - uses: actions/checkout@v4
-
-  - run: echo "RUN OK"
+  - run: echo hello
 ```
