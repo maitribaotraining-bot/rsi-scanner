@@ -1,13 +1,23 @@
-name: test
+name: RSI Scanner
 
 on:
-workflow_dispatch:
+  schedule:
+    - cron: '30 4 * * 1-5'
+    - cron: '5 8 * * 1-5'
+
+  workflow_dispatch:
 
 jobs:
-test:
-runs-on: ubuntu-latest
+  scan:
+    runs-on: ubuntu-latest
 
-```
-steps:
-  - run: echo hello
-```
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install -r requirements.txt
+
+      - run: python main.py
