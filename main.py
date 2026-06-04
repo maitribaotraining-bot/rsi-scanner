@@ -1,4 +1,3 @@
-```python
 from vnstock import *
 import ta
 import requests
