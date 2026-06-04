@@ -1,10 +1,7 @@
+```yaml id="c8w2mn"
 name: RSI Scanner
 
 on:
-  schedule:
-    - cron: '30 4 * * 1-5'
-    - cron: '5 8 * * 1-5'
-
   workflow_dispatch:
 
 jobs:
@@ -12,12 +9,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - run: pip install -r requirements.txt
+      - name: Install libraries
+        run: pip install -r requirements.txt
 
-      - run: python main.py
+      - name: Run python main.py
+        run: python main.py
+```
