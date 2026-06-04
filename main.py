@@ -1,10 +1,12 @@
-from vnstock import *
+```python
+from vnstock import stock_historical_data
 import ta
 import requests
 
 BOT_TOKEN = "8937864972:AAGOMsxZOG7s6bKVW1al93ahQcfWU3lUYUg"
 CHAT_ID = "1259162767"
 
+# GUI BAT DAU
 requests.get(
     f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
     params={
@@ -13,14 +15,31 @@ requests.get(
     }
 )
 
-companies = listing_companies()
-
-hose_symbols = companies[
-    companies["exchange"] == "HOSE"
-]["ticker"].tolist()
+# DANH SACH MA
+hose_symbols = [
+    "AAA","AAM","ABR","ABS","ABT","ACB","ACC","ACL","ADS","AGG",
+    "AGR","ANV","APG","APH","ASM","AST","BCG","BCM","BFC","BIC",
+    "BID","BMI","BMP","BSI","BTP","BWE","C32","C47","CAV","CCI",
+    "CCL","CDC","CHP","CIG","CMG","CMX","CNG","COM","CRC","CSM",
+    "CTD","CTG","CTR","CTS","CVT","DBC","DBD","DCM","DGC","DGW",
+    "DHA","DHC","DIG","DMC","DPM","DRC","DXG","DXS","EIB","ELC",
+    "EVF","FCN","FPT","FRT","FTS","GAS","GEX","GIL","GMD","GVR",
+    "HAG","HAH","HAX","HCM","HDB","HDG","HHS","HHV","HPG","HSG",
+    "HT1","HVN","IDI","IJC","IMP","KBC","KDC","KDH","KOS","LCG",
+    "LPB","MBB","MSB","MSN","MWG","NKG","NLG","NT2","OCB","ORS",
+    "PAN","PC1","PDR","PET","PHR","PLX","PNJ","POW","PTB","PVD",
+    "PVT","REE","SAB","SAM","SBT","SCR","SHB","SJS","SSI","STB",
+    "SZC","TCB","TCH","TLG","TPB","VCB","VCG","VCI","VDS","VGC",
+    "VHC","VHM","VIB","VIC","VIX","VND","VNM","VPB","VPG","VPI",
+    "VRE","VSC","VSH","YEG","APH","ASM","BAF","BAF","BWE","CMG",
+    "CTR","CSV","D2D","DPR","DRH","EVG","FIR","GEE","GVR","HDC",
+    "HNG","ITA","KHG","LHG","MIG","NHA","NTL","OGC","PGC","QCG",
+    "RAL","SCS","SGN","TDM","TIP","TV2","VCF","VHC","VOS","VTO"
+]
 
 signals = []
 
+# HAM TINH RSI
 def get_indicators(df):
 
     rsi = ta.momentum.RSIIndicator(
@@ -44,6 +63,7 @@ def get_indicators(df):
 
     return latest_rsi, latest_stoch
 
+# QUET
 for symbol in hose_symbols:
 
     try:
@@ -68,6 +88,7 @@ for symbol in hose_symbols:
 
         print(symbol, rsi_1d, stoch_1d)
 
+        # DIEU KIEN
         if rsi_1d < 30 and stoch_1d < 30:
 
             latest_price = df["close"].iloc[-1]
@@ -83,14 +104,16 @@ for symbol in hose_symbols:
 
         print("LOI:", symbol, e)
 
+# TIN NHAN
 if signals:
 
     message = "\n".join(signals)
 
 else:
 
-    message = "❌ KHONG CO MA HOSE THOA DIEU KIEN"
+    message = "❌ KHONG CO MA THOA DIEU KIEN"
 
+# GUI TELEGRAM
 response = requests.get(
     f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
     params={
@@ -101,6 +124,7 @@ response = requests.get(
 
 print(response.text)
 
+# HOAN TAT
 requests.get(
     f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
     params={
@@ -108,3 +132,4 @@ requests.get(
         "text": "✅ SCAN HOAN TAT"
     }
 )
+```
