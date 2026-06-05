@@ -1,7 +1,8 @@
-name: Quet Thu Cong
+name: Auto Scan
 
 on:
-workflow_dispatch:
+schedule:
+- cron: '*/15 * * * *'
 
 jobs:
 scan:
@@ -9,5 +10,5 @@ runs-on: ubuntu-latest
 
 ```
 steps:
-  - run: echo Manual Scan
+  - run: echo AUTO RUNNING
 ```
