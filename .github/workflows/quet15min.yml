@@ -1,14 +1,11 @@
 name: Auto Scan
 
 on:
-schedule:
-- cron: '*/15 * * * *'
+  schedule:
+    - cron: '*/15 * * * *'
 
 jobs:
-scan:
-runs-on: ubuntu-latest
-
-```
-steps:
-  - run: echo AUTO RUNNING
-```
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo AUTO RUNNING
