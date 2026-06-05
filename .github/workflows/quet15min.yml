@@ -2,7 +2,7 @@ name: Auto Scan
 
 on:
   schedule:
-    - cron: '*/3 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch: # <--- Thêm dòng này để tạo nút bấm chạy thủ công
 
 jobs:
