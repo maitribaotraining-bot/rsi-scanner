@@ -8,4 +8,4 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - run: echo AUTO RUNNING
+      - run: python main.py
