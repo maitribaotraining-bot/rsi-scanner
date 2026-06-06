@@ -10,7 +10,7 @@ from datetime import datetime
 # TELEGRAM
 # ====================================
 BOT_TOKEN = "8937864972:AAGOMsxZOG7s6bKVW1al93ahQcfWU3lUYUg"
-CHAT_ID = "1259162767"
+CHAT_ID = "-1004292489803"
 
 # ====================================
 # DANH SACH 200 MA POTENTIAL (Cập nhật 2026)
