@@ -3,11 +3,11 @@ import pandas as pd
 import ta
 import requests
 import time
-import os
+import numpy as np
 from datetime import datetime
 
 # ====================================
-# TELEGRAM
+# TELEGRAM CONFIG
 # ====================================
 BOT_TOKEN = "8937864972:AAGOMsxZOG7s6bKVW1al93ahQcfWU3lUYUg"
 CHAT_ID = "-1004292489803"
@@ -44,100 +44,148 @@ hose_symbols = [
 ]
 
 # ====================================
-# TỰ ĐỘNG TÍNH TOÁN BATCH (20 NHÓM TỪ 1 ĐẾN 20)
+# TỰ ĐỘNG TÍNH TOÁN BATCH
 # ====================================
 BATCH_SIZE = 10
-total_slots = len(hose_symbols) // BATCH_SIZE  # Có 20 nhóm
+total_slots = len(hose_symbols) // BATCH_SIZE
 
 current_minute = datetime.now().minute
 current_hour = datetime.now().hour
 
 total_runs_today = (current_hour * 4) + (current_minute // 15)
 batch_index = total_runs_today % total_slots
-
-# Đổi số 0 thành Nhóm 1, Nhóm 2,... cho anh dễ nhìn trên Telegram
 group_number = batch_index + 1 
 
 start_index = batch_index * BATCH_SIZE
 end_index = start_index + BATCH_SIZE
 batch_symbols = hose_symbols[start_index:end_index]
 
-# ====================================
-# HAM HỖ TRỢ GỬI TELEGRAM NHANH
-# ====================================
 def send_telegram(text_message):
     try:
         requests.post(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": text_message}
+            data={"chat_id": CHAT_ID, "text": text_message, "parse_mode": "Markdown"}
         )
     except Exception as e:
         print("Lỗi gửi Telegram:", e)
 
-# HAM TÍNH RSI (Đã sửa lỗi đóng ngoặc ở dòng 82 cũ)
-def get_rsi(df):
-    df_sorted = df.sort_index(ascending=True)
-    close = pd.to_numeric(df_sorted["close"])
-    rsi = ta.momentum.RSIIndicator(close=close, window=14).rsi()
-    return round(rsi.iloc[-1], 2)
+# ====================================
+# QUÉT TIN TỨC & PHÂN TÍCH SẮC THÁI NGẮN GỌN
+# ====================================
+def get_news_sentiment(symbol):
+    try:
+        # Gọi nguồn tin tức tổng hợp từ Vnstock
+        stock = Vnstock().stock(symbol=symbol, source="VCI")
+        df_news = stock.company.news()
+        if df_news is None or df_news.empty:
+            return "Trung lập", "Không có tin tức mới nổi bật"
+        
+        # Lấy tiêu đề tin mới nhất
+        latest_title = df_news['title'].iloc[0]
+        
+        # Từ khóa định nghĩa sắc thái tin tức chuyên sâu cho TTCK VN
+        negative_words = ['lỗ', 'giảm', 'phạt', 'cảnh báo', 'chậm', 'hủy', 'thanh tra', 'đình chỉ', 'xấu', 'vướng mắc']
+        positive_words = ['lãi', 'tăng trưởng', 'vượt', 'ký kết', 'đạt', 'doanh thu', 'xuất khẩu', 'lợi nhuận', 'trúng thầu']
+        
+        score = 0
+        for word in negative_words:
+            if word in latest_title.lower():
+                score -= 1
+        for word in positive_words:
+            if word in latest_title.lower():
+                score += 1
+                
+        if score < 0:
+            return "Tin xấu", latest_title
+        elif score > 0:
+            return "Tin tốt", latest_title
+        else:
+            return "Trung lập", latest_title
+    except:
+        return "Trung lập", "Không có tin tức mới nổi bật"
 
 # ====================================
-# 1. THÔNG BÁO BẮT ĐẦU QUÉT NHÓM
+# THUẬT TOÁN ĐA KHUNG VÀ CHỈ BÁO CHIẾN LƯỢC
 # ====================================
-print(f"--- KHỞI ĐỘNG NHÓM {group_number} ---")
-send_telegram(
-    f"🔍 [BOT] Bắt đầu quét NHÓM {group_number}/20\n"
-    f"📋 Danh sách 10 mã: {', '.join(batch_symbols)}"
-)
+def analyze_multi_timeframe(df):
+    df_daily = df.sort_index(ascending=True).copy()
+    df_daily['time'] = pd.to_datetime(df_daily['time'])
+    df_daily.set_index('time', inplace=True)
+    
+    # 1. Khung tuần (1W) - Xác định xu hướng lớn qua EMA20 tuần
+    df_weekly = df_daily['close'].resample('W').last().to_frame()
+    df_weekly['ema20'] = ta.trend.EMAIndicator(close=df_weekly['close'], window=20).ema_indicator()
+    
+    if len(df_weekly) >= 2:
+        trend_1w = "Uptrend" if df_weekly['close'].iloc[-1] > df_weekly['ema20'].iloc[-1] else "Downtrend"
+    else:
+        trend_1w = "Đi ngang"
 
-count_signals_found = 0
+    # 2. Khung ngày (1D)
+    close_d = pd.to_numeric(df_daily["close"])
+    high_d = pd.to_numeric(df_daily["high"])
+    low_d = pd.to_numeric(df_daily["low"])
+    
+    rsi_series = ta.momentum.RSIIndicator(close=close_d, window=14).rsi()
+    stoch_rsi_obj = ta.momentum.StochasticRSIIndicator(close=close_d, window=14, smooth1=3, smooth2=3)
+    stoch_k = stoch_rsi_obj.stochrsi_k() * 100
+    stoch_d_val = stoch_rsi_obj.stochrsi_d() * 100
+    
+    # Giả lập MCDX Banker Fund Flow bằng Phân vị RSI khung 20 phiên
+    rsi_mcdx = ta.momentum.RSIIndicator(close=close_d, window=20).rsi()
+    banker_series = np.clip(np.where(rsi_mcdx > 50, (rsi_mcdx - 50) * 2, 0), 0, 100)
+    
+    latest_price = round(close_d.iloc[-1], 2)
+    latest_rsi = round(rsi_series.iloc[-1], 2)
+    latest_k = round(stoch_k.iloc[-1], 2)
+    latest_d = round(stoch_d_val.iloc[-1], 2)
+    latest_banker = round(banker_series[-1], 2)
+    
+    status_1d = "Bình thường"
+    if latest_rsi < 30:
+        status_1d = "Quá bán"
+    elif latest_k < 20 and latest_k > latest_d:
+        status_1d = "Tín hiệu đáy"
+
+    # 3. Phương pháp Mô phỏng hành vi quá khứ (Simulation) trong 3 năm
+    match_count = 0
+    success_count = 0
+    
+    for i in range(50, len(df_daily) - 5):
+        hist_rsi = rsi_series.iloc[i]
+        hist_k = stoch_k.iloc[i]
+        hist_banker = banker_series[i]
+        
+        if abs(hist_rsi - latest_rsi) < 5 and abs(hist_banker - latest_banker) < 10:
+            match_count += 1
+            if (close_d.iloc[i+5] - close_d.iloc[i]) / close_d.iloc[i] > 0.02: # Đạt tỷ suất > 2% sau T+5
+                success_count += 1
+                
+    win_rate = round((success_count / match_count) * 100, 2) if match_count > 0 else 50.0
+    
+    return latest_price, trend_1w, status_1d, latest_rsi, latest_k, latest_banker, win_rate
 
 # ====================================
-# 2. VÒNG LẶP QUET VÀ TRẢ KẾT QUẢ TỪNG LẦN (REAL-TIME)
+# VÒNG LẶP QUÉT CHÍNH
 # ====================================
+print(f"--- KHỞI CHẠY HỆ THỐNG ĐA KHUNG VÀ TIN TỨC NHÓM {group_number} ---")
+signals_found = []
+
 for symbol in batch_symbols:
     try:
         print("Scanning:", symbol)
         stock = Vnstock().stock(symbol=symbol, source="VCI")
-        
-        df = stock.quote.history(
-            start="2024-01-01",
-            end="2026-12-31",
-            interval="1D"
-        )
+        df = stock.quote.history(start="2023-01-01", end="2026-12-31", interval="1D")
 
-        if df is None or len(df) < 20:
+        if df is None or len(df) < 100:
             continue
 
-        latest_rsi = get_rsi(df)
+        price, trend_1w, status_1d, rsi, stoch_k, banker, sim_prob = analyze_multi_timeframe(df)
         
-        df_sorted = df.sort_index(ascending=True)
-        latest_price = round(pd.to_numeric(df_sorted["close"]).iloc[-1], 2)
-
-        print(symbol, "RSI:", latest_rsi)
-
-        # THOẢ ĐIỀU KIỆN LÀ BẮN TIN NHẮN NGAY LẬP TỨC
-        if latest_rsi < 30:
-            count_signals_found += 1
-            signal_msg = (
-                f"🟢 PHÁT HIỆN TÍN HIỆU (Nhóm {group_number})\n"
-                f"Mã cổ phiếu: {symbol}\n"
-                f"Giá hiện tại: {latest_price}\n"
-                f"Chỉ số RSI14: {latest_rsi} (< 30 - Quá bán)"
-            )
-            send_telegram(signal_msg)
-
-        time.sleep(4) # Chống bị khóa API do spam lệnh nhanh
-
-    except Exception as e:
-        print(f"Lỗi tại mã {symbol}: {e}")
-        time.sleep(6)
-
-# ====================================
-# 3. THÔNG BÁO KẾT THÚC NHÓM
-# ====================================
-print(f"--- KẾT THÚC NHÓM {group_number} ---")
-send_telegram(
-    f"🏁 [BOT] Đã quét xong xuôi NHÓM {group_number}/20.\n"
-    f"📊 Tìm thấy: {count_signals_found} mã thỏa điều kiện."
-)
+        # KẾT HỢP ĐIỀU KIỆN LỌC CHUẨN
+        if (rsi < 30) or (stoch_k < 20 and banker > 15):
+            # Cào tin tức real-time ngay khi mã đạt tiêu chuẩn kỹ thuật
+            sentiment, news_title = get_news_sentiment(symbol)
+            
+            # Đưa ra nhận định tự động dựa trên Đa khung + Dòng tiền + Tin tức
+            if trend
