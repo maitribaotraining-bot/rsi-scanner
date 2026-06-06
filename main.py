@@ -188,7 +188,7 @@ if __name__ == '__main__':
     if len(signals_found) > 0:
         msg_summary += f"🟪 Tìm thấy {len(signals_found)} mã có tín hiệu chiến lược:\n" + "".join(signals_found)
     else:
-        msg_summary += "🟪 Không có mã nào hội tụ đủ điều kiện xin thông cảm chờ thêm."
+        msg_summary += "🟪 Không có mã nào hội tụ đủ điều kiện, xin anh thông cảm chờ thêm!"
         
     send_telegram(msg_summary)
     print(f"--- [GITHUB ACTIONS] ĐÃ XONG NHÓM {group_number} ---")
