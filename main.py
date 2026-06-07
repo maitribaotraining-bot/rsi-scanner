@@ -42,7 +42,3 @@ hose_symbols = [
 ]
 
 BATCH_SIZE = 19
-DELAY_BETWEEN_BATCHES = 120 
-
-def send_telegram(text_message):
-    try:
