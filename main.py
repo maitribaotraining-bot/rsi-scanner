@@ -1,10 +1,13 @@
-from vnstock import Vnstock
 import pandas as pd
 import ta
 import requests
 import time
 import numpy as np
 from datetime import datetime
+
+# LƯU Ý: Import theo chuẩn API mới của Vnstock
+from vnstock.api.quote import Quote
+from vnstock.api.company import Company
 
 # ====================================
 # TELEGRAM CONFIG
@@ -61,8 +64,9 @@ def send_telegram(text_message):
 
 def get_news_sentiment(symbol):
     try:
-        stock = Vnstock().stock(symbol=symbol, source="VCI")
-        df_news = stock.company.news()
+        # Sửa đổi theo API vnstock mới
+        comp = Company(symbol=symbol, source="VCI")
+        df_news = comp.news()
         if df_news is None or df_news.empty:
             return "Trung lập", "Không có tin tức mới nổi bật"
         latest_title = df_news['title'].iloc[0]
@@ -95,7 +99,9 @@ def analyze_multi_timeframe(df):
     # Khung ngày (1D)
     close_d = pd.to_numeric(df_daily["close"])
     rsi_series = ta.momentum.RSIIndicator(close=close_d, window=14).rsi()
-    stoch_rsi_obj = ta.momentum.StochasticRSIIndicator(close=close_d, window=14, smooth1=3, smooth2=3)
+    
+    # SỬA LỖI: Gọi chỉ báo StochasticRSI chuẩn xác theo cấu trúc mới
+    stoch_rsi_obj = ta.momentum.StochRSIIndicator(close=close_d, window=14, smooth1=3, smooth2=3)
     stoch_k = stoch_rsi_obj.stochrsi_k() * 100
     stoch_d_val = stoch_rsi_obj.stochrsi_d() * 100
     
@@ -133,7 +139,6 @@ if __name__ == '__main__':
 
     print(f"🚀 BẮT ĐẦU CHU KỲ QUÉT TOÀN BỘ DANH SÁCH ({total_symbols} MÃ) CHIA THÀNH {total_slots} NHÓM...")
 
-    # Vòng lặp chạy liên tục cho đến khi đi hết danh sách mã
     while start_idx < total_symbols:
         end_idx = min(start_idx + BATCH_SIZE, total_symbols)
         batch_symbols = hose_symbols[start_idx:end_idx]
@@ -143,8 +148,9 @@ if __name__ == '__main__':
         
         for symbol in batch_symbols:
             try:
-                stock = Vnstock().stock(symbol=symbol, source="VCI")
-                df = stock.quote.history(start="2023-01-01", end="2026-12-31", interval="1D")
+                # SỬA LỖI: Sử dụng lớp Quote mới của vnstock để lấy lịch sử giá
+                q = Quote(symbol=symbol, source="VCI")
+                df = q.history(start="2023-01-01", end="2026-12-31", interval="1D")
                 
                 if df is None or len(df) < 100: 
                     continue
@@ -177,13 +183,13 @@ if __name__ == '__main__':
                         f"---"
                     )
                     signals_found.append(item_str)
-                time.sleep(4)  # Tránh spam API giữa từng mã cổ phiếu
+                time.sleep(4)
                 
             except Exception as e:
                 print(f"Lỗi tại mã {symbol}: {e}")
                 time.sleep(6)
                 
-        # Tạo và gửi báo cáo Telegram cho nhóm hiện tại
+        # Gửi báo cáo Telegram
         msg_summary = f"🤖 **[BOT] Quét kết quả (Nhóm {group_number}/{total_slots}): Hoàn thành**\n"
         msg_summary += f"📋 Số lượng mã đã quét trong nhóm này: {len(batch_symbols)} mã\n"
         if len(signals_found) > 0:
@@ -194,13 +200,11 @@ if __name__ == '__main__':
         send_telegram(msg_summary)
         print(f"--- ✅ ĐÃ XONG NHÓM {group_number}/{total_slots} ---")
 
-        # Cập nhật vị trí để chuyển sang nhóm kế tiếp
         start_idx += BATCH_SIZE
         group_number += 1
 
-        # Nếu vẫn còn mã chưa quét, bot sẽ dừng nghỉ 120 giây trước khi chạy tiếp nhóm mới
         if start_idx < total_symbols:
-            print(f"💤 Nghỉ {DELAY_BETWEEN_BATCHES} giây để tránh bị lock IP/API...")
+            print(f"💤 Nghỉ {DELAY_BETWEEN_BATCHES} giây trước khi quét nhóm kế tiếp...")
             time.sleep(DELAY_BETWEEN_BATCHES)
 
     print("\n🏁 HOÀN THÀNH QUÉT TOÀN BỘ 200 MÃ CỔ PHIẾU!")
