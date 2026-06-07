@@ -4,10 +4,6 @@ import time
 import numpy as np
 from datetime import datetime
 
-# Import chính xác module mới theo khuyến nghị từ ảnh log của anh
-from vnstock.api.quote import Quote
-from vnstock.api.company import Company
-
 # ====================================
 # TELEGRAM CONFIG
 # ====================================
@@ -60,46 +56,57 @@ def send_telegram(text_message):
     except Exception as e:
         print("Lỗi gửi Telegram:", e)
 
+def fetch_data_fallback(symbol):
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        url = f"https://apipubcks.tcbs.com.vn/api/v1/stock/bars-long-term?ticker={symbol}&type=stock&resolution=D&from=1672531200&to=1798675200"
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            data = res.json().get('data', [])
+            if data:
+                df = pd.DataFrame(data)
+                df = df.rename(columns={'tradingDate': 'date'})
+                return df
+    except:
+        pass
+    return None
+
 def get_news_sentiment(symbol):
     try:
-        # Sử dụng đúng lớp Company theo chuẩn mới tinh trong ảnh log
-        comp = Company(symbol=symbol, source='VCI')
-        df_news = comp.news()
-        if df_news is None or df_news.empty:
-            return "Trung lập", "Không có tin tức mới nổi bật"
-        latest_title = df_news['title'].iloc[0]
-        
-        negative_words = ['lỗ', 'giảm', 'phạt', 'cảnh báo', 'chậm', 'hủy', 'thanh tra', 'đình chỉ', 'xấu', 'vướng mắc']
-        positive_words = ['lãi', 'tăng trưởng', 'vượt', 'ký kết', 'đạt', 'doanh thu', 'xuất khẩu', 'lợi nhuận', 'trúng thầu']
-        
-        score = 0
-        for word in negative_words:
-            if word in latest_title.lower(): score -= 1
-        for word in positive_words:
-            if word in latest_title.lower(): score += 1
+        headers = {"User-Agent": "Mozilla/5.0"}
+        url = f"https://apipubcks.tcbs.com.vn/api/v1/stock/{symbol}/news-v2?size=1"
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            news_list = res.json().get('data', [])
+            if news_list:
+                latest_title = news_list[0].get('title', '')
+                negative_words = ['lỗ', 'giảm', 'phạt', 'cảnh báo', 'chậm', 'hủy', 'thanh tra', 'đình chỉ', 'xấu']
+                positive_words = ['lãi', 'tăng trưởng', 'vượt', 'ký kết', 'đạt', 'doanh thu', 'lợi nhuận', 'trúng thầu']
                 
-        if score < 0: return "Tin xấu", latest_title
-        elif score > 0: return "Tin tốt", latest_title
-        return "Trung lập", latest_title
+                score = 0
+                for word in negative_words:
+                    if word in latest_title.lower(): score -= 1
+                for word in positive_words:
+                    if word in latest_title.lower(): score += 1
+                        
+                if score < 0: return "Tin xấu", latest_title
+                elif score > 0: return "Tin tốt", latest_title
+                return "Trung lập", latest_title
     except:
-        return "Trung lập", "Không có tin tức mới nổi bật"
+        pass
+    return "Trung lập", "Không có tin tức mới nổi bật"
 
 def analyze_multi_timeframe(df):
-    df_daily = df.sort_index(ascending=True).copy()
-    
-    # Xử lý cột thời gian linh hoạt
-    for col in ['date', 'time', 'datetime']:
-        if col in df_daily.columns:
-            df_daily[col] = pd.to_datetime(df_daily[col])
-            df_daily.set_index(col, inplace=True)
-            break
+    df_daily = df.sort_values(by='date', ascending=True).copy()
+    df_daily['date'] = pd.to_datetime(df_daily['date'])
+    df_daily.set_index('date', inplace=True)
             
-    # Tính EMA20 khung tuần (1W) thuần bằng Pandas
+    # Tự tính toán EMA20 Tuần
     df_weekly = df_daily['close'].resample('W').last().to_frame()
     df_weekly['ema20'] = df_weekly['close'].ewm(span=20, adjust=False).mean()
     trend_1w = "Uptrend" if len(df_weekly) >= 2 and df_weekly['close'].iloc[-1] > df_weekly['ema20'].iloc[-1] else "Downtrend"
 
-    # Tính RSI 14 khung ngày (1D) thuần túy bằng toán học, không phụ thuộc thư viện ta
+    # Tự tính toán RSI 14 Ngày bằng toán học lõi Pandas
     close_d = pd.to_numeric(df_daily["close"])
     delta = close_d.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -107,14 +114,14 @@ def analyze_multi_timeframe(df):
     rs = gain / loss
     rsi_series = 100 - (100 / (1 + rs))
     
-    # Tự tính toán Stochastic RSI chuẩn chỉnh bằng Pandas để chặn đứng lỗi bẻ hàm
+    # Tự tính toán Stochastic RSI 14 Ngày
     rsi_min = rsi_series.rolling(window=14).min()
     rsi_max = rsi_series.rolling(window=14).max()
     stoch_rsi = (rsi_series - rsi_min) / (rsi_max - rsi_min)
     stoch_k = stoch_rsi.rolling(window=3).mean() * 100
     stoch_d_val = stoch_k.rolling(window=3).mean()
     
-    # Giả lập dòng tiền cá mập Banker
+    # Tự tính toán Hệ thống dòng tiền giả lập Banker
     gain_20 = (delta.where(delta > 0, 0)).rolling(window=20).mean()
     loss_20 = (-delta.where(delta < 0, 0)).rolling(window=20).mean()
     rsi_20 = 100 - (100 / (1 + (gain_20 / loss_20)))
@@ -124,94 +131,13 @@ def analyze_multi_timeframe(df):
     latest_rsi = round(rsi_series.iloc[-1], 2) if not np.isnan(rsi_series.iloc[-1]) else 50.0
     latest_k = round(stoch_k.iloc[-1], 2) if not np.isnan(stoch_k.iloc[-1]) else 50.0
     latest_d = round(stoch_d_val.iloc[-1], 2) if not np.isnan(stoch_d_val.iloc[-1]) else 50.0
-    latest_banker = round(banker_series.iloc[-1], 2) if not np.isnan(banker_series.iloc[-1]) else 0.0
+    latest_banker = round(banker_series[-1], 2) if not np.isnan(banker_series[-1]) else 0.0
     
     status_1d = "Quá bán" if latest_rsi < 30 else ("Tín hiệu đáy" if latest_k < 20 and latest_k > latest_d else "Bình thường")
 
-    # Thuật toán mô phỏng lịch sử
+    # Thuật toán tính toán xác suất lịch sử
     match_count, success_count = 0, 0
     for i in range(50, len(df_daily) - 5):
-        if abs(rsi_series.iloc[i] - latest_rsi) < 5 and abs(banker_series.iloc[i] - latest_banker) < 10:
+        if abs(rsi_series.iloc[i] - latest_rsi) < 5 and abs(banker_series[i] - latest_banker) < 10:
             match_count += 1
-            if (close_d.iloc[i+5] - close_d.iloc[i]) / close_d.iloc[i] > 0.02: 
-                success_count += 1
-                
-    sim_prob = round((success_count / match_count) * 100, 2) if match_count > 0 else 50.0
-    return latest_price, trend_1w, status_1d, latest_rsi, latest_k, latest_banker, sim_prob
-
-# ====================================
-# MAIN ENTRY
-# ====================================
-if __name__ == '__main__':
-    total_symbols = len(hose_symbols)
-    start_idx = 0
-    group_number = 1
-
-    print(f"🚀 KHỞI ĐỘNG HỆ THỐNG MỚI CHUẨN XÁC NĂM 2026...")
-
-    while start_idx < total_symbols:
-        end_idx = min(start_idx + BATCH_SIZE, total_symbols)
-        batch_symbols = hose_symbols[start_idx:end_idx]
-        
-        print(f"⏳ Đang quét cụm {group_number}...")
-        signals_found = []
-        
-        for symbol in batch_symbols:
-            try:
-                # Sử dụng đúng lớp Quote theo khuyến nghị hiển thị trong ảnh log
-                q = Quote(symbol=symbol, source='VCI')
-                df = q.history(start="2023-01-01", end="2026-12-31", interval="1D")
-                
-                if df is None or len(df) < 100: 
-                    continue
-                
-                price, trend_1w, status_1d, rsi, stoch_k, banker, sim_prob = analyze_multi_timeframe(df)
-                
-                # Bộ lọc điều kiện khắt khe
-                if (rsi < 30) or (stoch_k < 20 and banker > 15):
-                    sentiment, news_title = get_news_sentiment(symbol)
-                    
-                    if trend_1w == "Uptrend" and banker > 20:
-                        if sentiment == "Tin xấu":
-                            verdict = "MUA GOM - Tin xấu ra để đè giá, cá mập âm thầm hấp thụ hết lực bán, cơ hội gom giá tốt."
-                        else:
-                            verdict = "MUA GOM - Xu hướng lớn ủng hộ, cá mập đang đẩy tiền gom hàng, xác suất nổ tím cao."
-                        decision_icon = "🟪"
-                    elif trend_1w == "Downtrend":
-                        verdict = f"THEO DÕI - Khung tuần xấu, rủi ro dính bẫy giá tăng (Bull-trap) do tin tức {sentiment.lower()} bủa vây."
-                        decision_icon = "🟡"
-                    else:
-                        verdict = "THEO DÕI - Cổ phiếu đang tích lũy đi ngang, chờ dòng tiền bùng nổ rõ ràng hơn."
-                        decision_icon = "🟡"
-
-                    item_str = (
-                        f"\n**{symbol} -> Giá: {price}**\n"
-                        f"+ 🌐 Đa khung: Tuần (1W): {trend_1w} | Ngày (1D): {status_1d}\n"
-                        f"+ 📊 Kỹ thuật: RSI: {rsi} | StochK: {stoch_k} | Banker: {banker}%\n"
-                        f"+ 📰 Tin tức: **{sentiment}** ({news_title[:45]}...)\n"
-                        f"+ 📈 Mô phỏng: Xác suất tăng giá 5 phiên tới: {sim_prob}%\n"
-                        f"+ {decision_icon} Nhận định: {verdict}\n"
-                        f"---"
-                    )
-                    signals_found.append(item_str)
-                time.sleep(4)
-                
-            except Exception as e:
-                print(f"⚠️ Bỏ qua mã {symbol}: {e}")
-                time.sleep(5)
-                
-        # CHỈ GỬI KHI CÓ TÍN HIỆU (BỎ SẠCH TIÊU ĐỀ THỪA THEO Ý ANH)
-        if len(signals_found) > 0:
-            msg_summary = "".join(signals_found)
-            send_telegram(msg_summary)
-            print(f"✅ Đã bắn tín hiệu nhóm {group_number} về Telegram.")
-        else:
-            print(f"💤 Nhóm {group_number} lặng sóng.")
-
-        start_idx += BATCH_SIZE
-        group_number += 1
-
-        if start_idx < total_symbols:
-            time.sleep(DELAY_BETWEEN_BATCHES)
-
-    print("\n🏁 TIẾN TRÌNH HOÀN TẤT!")
+            if (close_d.iloc[i+5] - close_d.iloc[i]) / close_d.iloc
