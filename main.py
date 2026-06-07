@@ -43,22 +43,9 @@ hose_symbols = [
     "VFS", "SBS", "AAS", "DSC", "PAS", "DTL", "BCA", "VIS"
 ]
 
-# ====================================
-# TỰ ĐỘNG TÍNH TOÁN BATCH
-# ====================================
-BATCH_SIZE = 10
-total_slots = len(hose_symbols) // BATCH_SIZE
-
-current_minute = datetime.now().minute
-current_hour = datetime.now().hour
-
-total_runs_today = (current_hour * 4) + (current_minute // 15)
-batch_index = total_runs_today % total_slots
-group_number = batch_index + 1 
-
-start_index = batch_index * BATCH_SIZE
-end_index = start_index + BATCH_SIZE
-batch_symbols = hose_symbols[start_index:end_index]
+# Cấu hình số mã mỗi lượt quét và thời gian nghỉ giữa các lượt
+BATCH_SIZE = 19
+DELAY_BETWEEN_BATCHES = 120  # Nghỉ 120 giây giữa các đợt quét
 
 def send_telegram(text_message):
     try:
@@ -124,7 +111,7 @@ def analyze_multi_timeframe(df):
     
     status_1d = "Quá bán" if latest_rsi < 30 else ("Tín hiệu đáy" if latest_k < 20 and latest_k > latest_d else "Bình thường")
 
-    # Mô phỏng
+    # Mô phỏng lịch sử
     match_count, success_count = 0, 0
     for i in range(50, len(df_daily) - 5):
         if abs(rsi_series.iloc[i] - latest_rsi) < 5 and abs(banker_series[i] - latest_banker) < 10:
@@ -138,57 +125,82 @@ def analyze_multi_timeframe(df):
 # MAIN ENTRY
 # ====================================
 if __name__ == '__main__':
-    print(f"--- [GITHUB ACTIONS] KÍCH HOẠT NHÓM {group_number}/20 ---")
-    signals_found = []
+    total_symbols = len(hose_symbols)
+    total_slots = (total_symbols + BATCH_SIZE - 1) // BATCH_SIZE
     
-    for symbol in batch_symbols:
-        try:
-            stock = Vnstock().stock(symbol=symbol, source="VCI")
-            df = stock.quote.history(start="2023-01-01", end="2026-12-31", interval="1D")
-            
-            if df is None or len(df) < 100: 
-                continue
-            
-            price, trend_1w, status_1d, rsi, stoch_k, banker, sim_prob = analyze_multi_timeframe(df)
-            
-            if (rsi < 30) or (stoch_k < 20 and banker > 15):
-                sentiment, news_title = get_news_sentiment(symbol)
-                
-                if trend_1w == "Uptrend" and banker > 20:
-                    if sentiment == "Tin xấu":
-                        verdict = "MUA GOM - Tin xấu ra để đè giá, cá mập âm thầm hấp thụ hết lực bán, cơ hội gom giá tốt."
-                    else:
-                        verdict = "MUA GOM - Xu hướng lớn ủng hộ, cá mập đang đẩy tiền gom hàng, xác suất nổ tím cao."
-                    decision_icon = "🟪"
-                elif trend_1w == "Downtrend":
-                    verdict = f"THEO DÕI - Khung tuần xấu, rủi ro dính bẫy giá tăng (Bull-trap) do tin tức {sentiment.lower()} bủa vây."
-                    decision_icon = "🟡"
-                else:
-                    verdict = "THEO DÕI - Cổ phiếu đang tích lũy đi ngang, chờ dòng tiền bùng nổ rõ ràng hơn."
-                    decision_icon = "🟡"
+    start_idx = 0
+    group_number = 1
 
-                item_str = (
-                    f"\n**{symbol} -> Giá: {price}**\n"
-                    f"+ 🌐 Đa khung: Tuần (1W): {trend_1w} | Ngày (1D): {status_1d}\n"
-                    f"+ 📊 Kỹ thuật: RSI: {rsi} | StochK: {stoch_k} | Banker: {banker}%\n"
-                    f"+ 📰 Tin tức: **{sentiment}** ({news_title[:45]}...)\n"
-                    f"+ 📈 Mô phỏng: Xác suất tăng giá 5 phiên tới: {sim_prob}%\n"
-                    f"+ {decision_icon} Nhận định: {verdict}\n"
-                    f"---"
-                )
-                signals_found.append(item_str)
-            time.sleep(4)
-            
-        except Exception as e:
-            print(f"Lỗi tại mã {symbol}: {e}")
-            time.sleep(6)
-            
-    # Tạo nội dung báo cáo an toàn
-    msg_summary = f"🤖 **[BOT] Chào Bảo, quét lần 1 (Nhóm {group_number}/20): Hoàn thành**\n"
-    if len(signals_found) > 0:
-        msg_summary += f"🟪 Tìm thấy {len(signals_found)} mã có tín hiệu chiến lược:\n" + "".join(signals_found)
-    else:
-        msg_summary += "🟪 Không có mã nào hội tụ đủ điều kiện, xin anh thông cảm chờ thêm!"
+    print(f"🚀 BẮT ĐẦU CHU KỲ QUÉT TOÀN BỘ DANH SÁCH ({total_symbols} MÃ) CHIA THÀNH {total_slots} NHÓM...")
+
+    # Vòng lặp chạy liên tục cho đến khi đi hết danh sách mã
+    while start_idx < total_symbols:
+        end_idx = min(start_idx + BATCH_SIZE, total_symbols)
+        batch_symbols = hose_symbols[start_idx:end_idx]
         
-    send_telegram(msg_summary)
-    print(f"--- [GITHUB ACTIONS] ĐÃ XONG NHÓM {group_number} ---")
+        print(f"\n--- ⏳ ĐANG QUÉT NHÓM {group_number}/{total_slots} ({len(batch_symbols)} MÃ) ---")
+        signals_found = []
+        
+        for symbol in batch_symbols:
+            try:
+                stock = Vnstock().stock(symbol=symbol, source="VCI")
+                df = stock.quote.history(start="2023-01-01", end="2026-12-31", interval="1D")
+                
+                if df is None or len(df) < 100: 
+                    continue
+                
+                price, trend_1w, status_1d, rsi, stoch_k, banker, sim_prob = analyze_multi_timeframe(df)
+                
+                if (rsi < 30) or (stoch_k < 20 and banker > 15):
+                    sentiment, news_title = get_news_sentiment(symbol)
+                    
+                    if trend_1w == "Uptrend" and banker > 20:
+                        if sentiment == "Tin xấu":
+                            verdict = "MUA GOM - Tin xấu ra để đè giá, cá mập âm thầm hấp thụ hết lực bán, cơ hội gom giá tốt."
+                        else:
+                            verdict = "MUA GOM - Xu hướng lớn ủng hộ, cá mập đang đẩy tiền gom hàng, xác suất nổ tím cao."
+                        decision_icon = "🟪"
+                    elif trend_1w == "Downtrend":
+                        verdict = f"THEO DÕI - Khung tuần xấu, rủi ro dính bẫy giá tăng (Bull-trap) do tin tức {sentiment.lower()} bủa vây."
+                        decision_icon = "🟡"
+                    else:
+                        verdict = "THEO DÕI - Cổ phiếu đang tích lũy đi ngang, chờ dòng tiền bùng nổ rõ ràng hơn."
+                        decision_icon = "🟡"
+
+                    item_str = (
+                        f"\n**{symbol} -> Giá: {price}**\n"
+                        f"+ 🌐 Đa khung: Tuần (1W): {trend_1w} | Ngày (1D): {status_1d}\n"
+                        f"+ 📊 Kỹ thuật: RSI: {rsi} | StochK: {stoch_k} | Banker: {banker}%\n"
+                        f"+ 📰 Tin tức: **{sentiment}** ({news_title[:45]}...)\n"
+                        f"+ 📈 Mô phỏng: Xác suất tăng giá 5 phiên tới: {sim_prob}%\n"
+                        f"+ {decision_icon} Nhận định: {verdict}\n"
+                        f"---"
+                    )
+                    signals_found.append(item_str)
+                time.sleep(4)  # Tránh spam API giữa từng mã cổ phiếu
+                
+            except Exception as e:
+                print(f"Lỗi tại mã {symbol}: {e}")
+                time.sleep(6)
+                
+        # Tạo và gửi báo cáo Telegram cho nhóm hiện tại
+        msg_summary = f"🤖 **[BOT] Quét kết quả (Nhóm {group_number}/{total_slots}): Hoàn thành**\n"
+        msg_summary += f"📋 Số lượng mã đã quét trong nhóm này: {len(batch_symbols)} mã\n"
+        if len(signals_found) > 0:
+            msg_summary += f"🟪 Tìm thấy {len(signals_found)} mã có tín hiệu chiến lược:\n" + "".join(signals_found)
+        else:
+            msg_summary += "🟪 Không có mã nào hội tụ đủ điều kiện trong nhóm này."
+            
+        send_telegram(msg_summary)
+        print(f"--- ✅ ĐÃ XONG NHÓM {group_number}/{total_slots} ---")
+
+        # Cập nhật vị trí để chuyển sang nhóm kế tiếp
+        start_idx += BATCH_SIZE
+        group_number += 1
+
+        # Nếu vẫn còn mã chưa quét, bot sẽ dừng nghỉ 120 giây trước khi chạy tiếp nhóm mới
+        if start_idx < total_symbols:
+            print(f"💤 Nghỉ {DELAY_BETWEEN_BATCHES} giây để tránh bị lock IP/API...")
+            time.sleep(DELAY_BETWEEN_BATCHES)
+
+    print("\n🏁 HOÀN THÀNH QUÉT TOÀN BỘ 200 MÃ CỔ PHIẾU!")
