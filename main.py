@@ -135,7 +135,7 @@ def analyze_multi_timeframe(df):
     
     status_1d = "Quá bán" if latest_rsi < 30 else ("Tín hiệu đáy" if latest_k < 20 and latest_k > latest_d else "Bình thường")
 
-    # Vá lỗi cú pháp chuẩn chỉnh 100% tại đây
+    # Thuật toán tính xác suất mô phỏng chuẩn xác
     match_count, success_count = 0, 0
     for i in range(50, len(df_daily) - 5):
         if abs(rsi_series.iloc[i] - latest_rsi) < 5 and abs(banker_series.iloc[i] - latest_banker) < 10:
@@ -151,7 +151,7 @@ if __name__ == '__main__':
     start_idx = 0
     group_number = 1
 
-    print(f"🚀 BẮT ĐẦU CHẠY BOT QUÉT ĐỘC LẬP CHUẨN XÁC NĂM 2026...")
+    print(f"🚀 BẮT ĐẦU CHẠY BOT QUÉT ĐỘC LẬP CHUẨN XÁC...")
 
     while start_idx < total_symbols:
         end_idx = min(start_idx + BATCH_SIZE, total_symbols)
@@ -168,7 +168,7 @@ if __name__ == '__main__':
                 
                 price, trend_1w, status_1d, rsi, stoch_k, banker, sim_prob = analyze_multi_timeframe(df)
                 
-                # Bộ lọc tín hiệu cốt lõi
+                # Bộ lọc điều kiện khắt khe
                 if (rsi < 30) or (stoch_k < 20 and banker > 15):
                     sentiment, news_title = get_news_sentiment(symbol)
                     
@@ -201,7 +201,7 @@ if __name__ == '__main__':
                 print(f"⚠️ Bỏ qua {symbol}: {e}")
                 time.sleep(3)
                 
-        # CHỈ GỬI TELEGRAM KHI CÓ TÍN HIỆU THEO ĐÚNG YÊU CẦU TÍNH GỌN
+        # CHỈ GỬI TELEGRAM KHI CÓ TÍN HIỆU (BỎ TIÊU ĐỀ THỪA)
         if len(signals_found) > 0:
             msg_summary = "".join(signals_found)
             send_telegram(msg_summary)
