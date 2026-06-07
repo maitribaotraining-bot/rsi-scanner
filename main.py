@@ -150,14 +150,16 @@ if __name__ == '__main__':
     total_symbols = len(hose_symbols)
     start_idx = 0
     group_number = 1
+    total_groups = (total_symbols + BATCH_SIZE - 1) // BATCH_SIZE
 
     print(f"🚀 BẮT ĐẦU CHẠY BOT QUÉT ĐỘC LẬP CHUẨN XÁC...")
+    send_telegram("🚀 *Hệ thống bắt đầu kích hoạt vòng quét tối ưu mới cho 200 mã...*")
 
     while start_idx < total_symbols:
         end_idx = min(start_idx + BATCH_SIZE, total_symbols)
         batch_symbols = hose_symbols[start_idx:end_idx]
         
-        print(f"⏳ Đang quét cụm {group_number}...")
+        print(f"⏳ Đang quét cụm {group_number}/{total_groups}...")
         signals_found = []
         
         for symbol in batch_symbols:
@@ -168,23 +170,31 @@ if __name__ == '__main__':
                 
                 price, trend_1w, status_1d, rsi, stoch_k, banker, sim_prob = analyze_multi_timeframe(df)
                 
-                # Bộ lọc điều kiện khắt khe
-                if (rsi < 30) or (stoch_k < 20 and banker > 15):
-                    sentiment, news_title = get_news_sentiment(symbol)
-                    
-                    if trend_1w == "Uptrend" and banker > 20:
-                        if sentiment == "Tin xấu":
-                            verdict = "MUA GOM - Tin xấu ra để đè giá, cá mập âm thầm hấp thụ hết lực bán, cơ hội gom giá tốt."
-                        else:
-                            verdict = "MUA GOM - Xu hướng lớn ủng hộ, cá mập đang đẩy tiền gom hàng, xác suất nổ tím cao."
-                        decision_icon = "🟪"
-                    elif trend_1w == "Downtrend":
-                        verdict = f"THEO DÕI - Khung tuần xấu, rủi ro dính bẫy giá tăng (Bull-trap) do tin tức {sentiment.lower()} bủa vây."
-                        decision_icon = "🟡"
-                    else:
-                        verdict = "THEO DÕI - Cổ phiếu đang tích lũy đi ngang, chờ dòng tiền bùng nổ rõ ràng hơn."
-                        decision_icon = "🟡"
+                # ÁP DỤNG 3 BỘ LỌC ĐỀ XUẤT MỚI TOÀN DIỆN
+                is_signal = False
+                verdict = ""
+                decision_icon = ""
 
+                # Chiến thuật 1: Săn Đáy Hoảng Loạn
+                if rsi < 30 or stoch_k < 15:
+                    is_signal = True
+                    decision_icon = "🚨"
+                    verdict = "ĐÁY HOẢNG LOẠN - Chỉ báo rơi vào vùng quá bán sâu. Phù hợp bắt dao rơi ăn nhịp hồi kỹ thuật T+."
+                
+                # Chiến thuật 2: Cá Mập Đè Gom vùng đáy
+                elif (30 <= rsi <= 45) and banker > 20:
+                    is_signal = True
+                    decision_icon = "🟪"
+                    verdict = "CÁ MẬP ĐÈ GOM - Giá đang đi ngang tích lũy vùng thấp nhưng dòng tiền Banker dâng cao. Gom theo dòng tiền lớn."
+                
+                # Chiến thuật 3: Siêu cổ vào sóng đẩy giá
+                elif trend_1w == "Uptrend" and banker > 40:
+                    is_signal = True
+                    decision_icon = "🔥"
+                    verdict = "SIÊU CỔ VÀO SÓNG - Khung tuần ủng hộ mạnh, dòng tiền cá mập đẩy điên cuồng. Phù hợp đánh gia tăng tỷ trọng lớn."
+
+                if is_signal:
+                    sentiment, news_title = get_news_sentiment(symbol)
                     item_str = (
                         f"\n**{symbol} -> Giá: {price}**\n"
                         f"+ 🌐 Đa khung: Tuần (1W): {trend_1w} | Ngày (1D): {status_1d}\n"
@@ -201,13 +211,15 @@ if __name__ == '__main__':
                 print(f"⚠️ Bỏ qua {symbol}: {e}")
                 time.sleep(3)
                 
-        # CHỈ GỬI TELEGRAM KHI CÓ TÍN HIỆU (BỎ TIÊU ĐỀ THỪA)
         if len(signals_found) > 0:
             msg_summary = "".join(signals_found)
             send_telegram(msg_summary)
             print(f"✅ Đã gửi tín hiệu cụm {group_number} về Telegram.")
-        else:
-            print(f"💤 Cụm {group_number} không có tín hiệu.")
+        
+        progress_msg = f"🤖 *[Tiến độ]* Đã quét xong Cụm {group_number}/{total_groups}."
+        if (start_idx + BATCH_SIZE) < total_symbols:
+            progress_msg += " Hệ thống tạm nghỉ 2 phút để chống bị chặn..."
+        send_telegram(progress_msg)
 
         start_idx += BATCH_SIZE
         group_number += 1
@@ -215,4 +227,5 @@ if __name__ == '__main__':
         if start_idx < total_symbols:
             time.sleep(DELAY_BETWEEN_BATCHES)
 
-    print("\n🏁 HỆ THỐNG HOÀN THÀNH QUÉT TOÀN BỘ 200 MÃ!")
+    print("\n🏁 HỆ THỐNG HOÀN THÀNH QUÉT TOÀN BỘ 200 MA!")
+    send_telegram("🏁 *Hệ thống đã hoàn thành quét toàn bộ danh mục 200 mã thành công!*")
