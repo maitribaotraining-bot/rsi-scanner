@@ -4,10 +4,7 @@ import requests
 import time
 import numpy as np
 from datetime import datetime
-
-# LƯU Ý: Import theo chuẩn API mới của Vnstock
-from vnstock.api.quote import Quote
-from vnstock.api.company import Company
+from vnstock import Vnstock
 
 # ====================================
 # TELEGRAM CONFIG
@@ -46,9 +43,8 @@ hose_symbols = [
     "VFS", "SBS", "AAS", "DSC", "PAS", "DTL", "BCA", "VIS"
 ]
 
-# Cấu hình số mã mỗi lượt quét và thời gian nghỉ giữa các lượt
 BATCH_SIZE = 19
-DELAY_BETWEEN_BATCHES = 120  # Nghỉ 120 giây giữa các đợt quét
+DELAY_BETWEEN_BATCHES = 120 
 
 def send_telegram(text_message):
     try:
@@ -60,13 +56,12 @@ def send_telegram(text_message):
         }
         requests.post(url, data=payload)
     except Exception as e:
-        print("Lỗi gửi Telegram:", e)
+        print("Lỗi kết nối gửi Telegram:", e)
 
 def get_news_sentiment(symbol):
     try:
-        # Sửa đổi theo API vnstock mới
-        comp = Company(symbol=symbol, source="VCI")
-        df_news = comp.news()
+        v = Vnstock()
+        df_news = v.stock(symbol=symbol, source='tcbs').company.news()
         if df_news is None or df_news.empty:
             return "Trung lập", "Không có tin tức mới nổi bật"
         latest_title = df_news['title'].iloc[0]
@@ -88,123 +83,44 @@ def get_news_sentiment(symbol):
 
 def analyze_multi_timeframe(df):
     df_daily = df.sort_index(ascending=True).copy()
-    df_daily['time'] = pd.to_datetime(df_daily['time'])
-    df_daily.set_index('time', inplace=True)
     
-    # Khung tuần (1W)
+    for col in ['date', 'time', 'datetime']:
+        if col in df_daily.columns:
+            df_daily[col] = pd.to_datetime(df_daily[col])
+            df_daily.set_index(col, inplace=True)
+            break
+            
     df_weekly = df_daily['close'].resample('W').last().to_frame()
     df_weekly['ema20'] = ta.trend.EMAIndicator(close=df_weekly['close'], window=20).ema_indicator()
     trend_1w = "Uptrend" if len(df_weekly) >= 2 and df_weekly['close'].iloc[-1] > df_weekly['ema20'].iloc[-1] else "Downtrend"
 
-    # Khung ngày (1D)
     close_d = pd.to_numeric(df_daily["close"])
     rsi_series = ta.momentum.RSIIndicator(close=close_d, window=14).rsi()
     
-    # SỬA LỖI: Gọi chỉ báo StochasticRSI chuẩn xác theo cấu trúc mới
-    stoch_rsi_obj = ta.momentum.StochRSIIndicator(close=close_d, window=14, smooth1=3, smooth2=3)
-    stoch_k = stoch_rsi_obj.stochrsi_k() * 100
-    stoch_d_val = stoch_rsi_obj.stochrsi_d() * 100
+    stoch_k = ta.momentum.stochrsi(close=close_d, window=14, smooth1=3, smooth2=3) * 100
+    stoch_d_val = stoch_k.rolling(window=3).mean()
     
-    # Giả lập Banker
     rsi_mcdx = ta.momentum.RSIIndicator(close=close_d, window=20).rsi()
     banker_series = np.clip(np.where(rsi_mcdx > 50, (rsi_mcdx - 50) * 2, 0), 0, 100)
     
     latest_price = round(close_d.iloc[-1], 2)
     latest_rsi = round(rsi_series.iloc[-1], 2)
     latest_k = round(stoch_k.iloc[-1], 2)
-    latest_d = round(stoch_d_val.iloc[-1], 2)
+    latest_d = round(stoch_d_val.iloc[-1], 2) if not np.isnan(stoch_d_val.iloc[-1]) else 50.0
     latest_banker = round(banker_series[-1], 2)
     
     status_1d = "Quá bán" if latest_rsi < 30 else ("Tín hiệu đáy" if latest_k < 20 and latest_k > latest_d else "Bình thường")
 
-    # Mô phỏng lịch sử
     match_count, success_count = 0, 0
     for i in range(50, len(df_daily) - 5):
         if abs(rsi_series.iloc[i] - latest_rsi) < 5 and abs(banker_series[i] - latest_banker) < 10:
             match_count += 1
-            if (close_d.iloc[i+5] - close_d.iloc[i]) / close_d.iloc[i] > 0.02: success_count += 1
+            if (close_d.iloc[i+5] - close_d.iloc[i]) / close_d.iloc[i] > 0.02: 
+                success_count += 1
                 
-    win_rate = round((success_count / match_count) * 100, 2) if match_count > 0 else 50.0
-    return latest_price, trend_1w, status_1d, latest_rsi, latest_k, latest_banker, win_rate
+    sim_prob = round((success_count / match_count) * 100, 2) if match_count > 0 else 50.0
+    return latest_price, trend_1w, status_1d, latest_rsi, latest_k, latest_banker, sim_prob
 
 # ====================================
 # MAIN ENTRY
-# ====================================
-if __name__ == '__main__':
-    total_symbols = len(hose_symbols)
-    total_slots = (total_symbols + BATCH_SIZE - 1) // BATCH_SIZE
-    
-    start_idx = 0
-    group_number = 1
-
-    print(f"🚀 BẮT ĐẦU CHU KỲ QUÉT TOÀN BỘ DANH SÁCH ({total_symbols} MÃ) CHIA THÀNH {total_slots} NHÓM...")
-
-    while start_idx < total_symbols:
-        end_idx = min(start_idx + BATCH_SIZE, total_symbols)
-        batch_symbols = hose_symbols[start_idx:end_idx]
-        
-        print(f"\n--- ⏳ ĐANG QUÉT NHÓM {group_number}/{total_slots} ({len(batch_symbols)} MÃ) ---")
-        signals_found = []
-        
-        for symbol in batch_symbols:
-            try:
-                # SỬA LỖI: Sử dụng lớp Quote mới của vnstock để lấy lịch sử giá
-                q = Quote(symbol=symbol, source="VCI")
-                df = q.history(start="2023-01-01", end="2026-12-31", interval="1D")
-                
-                if df is None or len(df) < 100: 
-                    continue
-                
-                price, trend_1w, status_1d, rsi, stoch_k, banker, sim_prob = analyze_multi_timeframe(df)
-                
-                if (rsi < 30) or (stoch_k < 20 and banker > 15):
-                    sentiment, news_title = get_news_sentiment(symbol)
-                    
-                    if trend_1w == "Uptrend" and banker > 20:
-                        if sentiment == "Tin xấu":
-                            verdict = "MUA GOM - Tin xấu ra để đè giá, cá mập âm thầm hấp thụ hết lực bán, cơ hội gom giá tốt."
-                        else:
-                            verdict = "MUA GOM - Xu hướng lớn ủng hộ, cá mập đang đẩy tiền gom hàng, xác suất nổ tím cao."
-                        decision_icon = "🟪"
-                    elif trend_1w == "Downtrend":
-                        verdict = f"THEO DÕI - Khung tuần xấu, rủi ro dính bẫy giá tăng (Bull-trap) do tin tức {sentiment.lower()} bủa vây."
-                        decision_icon = "🟡"
-                    else:
-                        verdict = "THEO DÕI - Cổ phiếu đang tích lũy đi ngang, chờ dòng tiền bùng nổ rõ ràng hơn."
-                        decision_icon = "🟡"
-
-                    item_str = (
-                        f"\n**{symbol} -> Giá: {price}**\n"
-                        f"+ 🌐 Đa khung: Tuần (1W): {trend_1w} | Ngày (1D): {status_1d}\n"
-                        f"+ 📊 Kỹ thuật: RSI: {rsi} | StochK: {stoch_k} | Banker: {banker}%\n"
-                        f"+ 📰 Tin tức: **{sentiment}** ({news_title[:45]}...)\n"
-                        f"+ 📈 Mô phỏng: Xác suất tăng giá 5 phiên tới: {sim_prob}%\n"
-                        f"+ {decision_icon} Nhận định: {verdict}\n"
-                        f"---"
-                    )
-                    signals_found.append(item_str)
-                time.sleep(4)
-                
-            except Exception as e:
-                print(f"Lỗi tại mã {symbol}: {e}")
-                time.sleep(6)
-                
-        # Gửi báo cáo Telegram
-        msg_summary = f"🤖 **[BOT] Quét kết quả (Nhóm {group_number}/{total_slots}): Hoàn thành**\n"
-        msg_summary += f"📋 Số lượng mã đã quét trong nhóm này: {len(batch_symbols)} mã\n"
-        if len(signals_found) > 0:
-            msg_summary += f"🟪 Tìm thấy {len(signals_found)} mã có tín hiệu chiến lược:\n" + "".join(signals_found)
-        else:
-            msg_summary += "🟪 Không có mã nào hội tụ đủ điều kiện trong nhóm này."
-            
-        send_telegram(msg_summary)
-        print(f"--- ✅ ĐÃ XONG NHÓM {group_number}/{total_slots} ---")
-
-        start_idx += BATCH_SIZE
-        group_number += 1
-
-        if start_idx < total_symbols:
-            print(f"💤 Nghỉ {DELAY_BETWEEN_BATCHES} giây trước khi quét nhóm kế tiếp...")
-            time.sleep(DELAY_BETWEEN_BATCHES)
-
-    print("\n🏁 HOÀN THÀNH QUÉT TOÀN BỘ 200 MÃ CỔ PHIẾU!")
+# =================================
