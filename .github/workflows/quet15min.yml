@@ -3,7 +3,7 @@ name: Auto Scan
 on:
   schedule:
     - cron: '*/15 * * * *'
-  workflow_dispatch: # <--- Thêm dòng này để tạo nút bấm chạy thủ công
+  workflow_dispatch: # Thêm nút bấm chạy thủ công trên GitHub
 
 jobs:
   scan:
@@ -15,6 +15,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - run: pip install -r requirements.txt
+      # Sửa lại dòng này để ép xóa sạch bộ nhớ đệm cũ và chỉ cài thư viện tính toán lõi ổn định
+      - run: |
+          python -m pip install --upgrade pip
+          pip install --no-cache-dir pandas requests numpy
 
       - run: python main.py
