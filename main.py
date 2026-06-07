@@ -131,13 +131,88 @@ def analyze_multi_timeframe(df):
     latest_rsi = round(rsi_series.iloc[-1], 2) if not np.isnan(rsi_series.iloc[-1]) else 50.0
     latest_k = round(stoch_k.iloc[-1], 2) if not np.isnan(stoch_k.iloc[-1]) else 50.0
     latest_d = round(stoch_d_val.iloc[-1], 2) if not np.isnan(stoch_d_val.iloc[-1]) else 50.0
-    latest_banker = round(banker_series[-1], 2) if not np.isnan(banker_series[-1]) else 0.0
+    latest_banker = round(banker_series.iloc[-1], 2) if not np.isnan(banker_series.iloc[-1]) else 0.0
     
     status_1d = "Quá bán" if latest_rsi < 30 else ("Tín hiệu đáy" if latest_k < 20 and latest_k > latest_d else "Bình thường")
 
-    # Thuật toán tính toán xác suất lịch sử
+    # Vá lỗi cú pháp chuẩn chỉnh 100% tại đây
     match_count, success_count = 0, 0
     for i in range(50, len(df_daily) - 5):
-        if abs(rsi_series.iloc[i] - latest_rsi) < 5 and abs(banker_series[i] - latest_banker) < 10:
+        if abs(rsi_series.iloc[i] - latest_rsi) < 5 and abs(banker_series.iloc[i] - latest_banker) < 10:
             match_count += 1
-            if (close_d.iloc[i+5] - close_d.iloc[i]) / close_d.iloc
+            if (close_d.iloc[i+5] - close_d.iloc[i]) / close_d.iloc[i] > 0.02: 
+                success_count += 1
+                
+    sim_prob = round((success_count / match_count) * 100, 2) if match_count > 0 else 50.0
+    return latest_price, trend_1w, status_1d, latest_rsi, latest_k, latest_banker, sim_prob
+
+if __name__ == '__main__':
+    total_symbols = len(hose_symbols)
+    start_idx = 0
+    group_number = 1
+
+    print(f"🚀 BẮT ĐẦU CHẠY BOT QUÉT ĐỘC LẬP CHUẨN XÁC NĂM 2026...")
+
+    while start_idx < total_symbols:
+        end_idx = min(start_idx + BATCH_SIZE, total_symbols)
+        batch_symbols = hose_symbols[start_idx:end_idx]
+        
+        print(f"⏳ Đang quét cụm {group_number}...")
+        signals_found = []
+        
+        for symbol in batch_symbols:
+            try:
+                df = fetch_data_fallback(symbol)
+                if df is None or len(df) < 100: 
+                    continue
+                
+                price, trend_1w, status_1d, rsi, stoch_k, banker, sim_prob = analyze_multi_timeframe(df)
+                
+                # Bộ lọc tín hiệu cốt lõi
+                if (rsi < 30) or (stoch_k < 20 and banker > 15):
+                    sentiment, news_title = get_news_sentiment(symbol)
+                    
+                    if trend_1w == "Uptrend" and banker > 20:
+                        if sentiment == "Tin xấu":
+                            verdict = "MUA GOM - Tin xấu ra để đè giá, cá mập âm thầm hấp thụ hết lực bán, cơ hội gom giá tốt."
+                        else:
+                            verdict = "MUA GOM - Xu hướng lớn ủng hộ, cá mập đang đẩy tiền gom hàng, xác suất nổ tím cao."
+                        decision_icon = "🟪"
+                    elif trend_1w == "Downtrend":
+                        verdict = f"THEO DÕI - Khung tuần xấu, rủi ro dính bẫy giá tăng (Bull-trap) do tin tức {sentiment.lower()} bủa vây."
+                        decision_icon = "🟡"
+                    else:
+                        verdict = "THEO DÕI - Cổ phiếu đang tích lũy đi ngang, chờ dòng tiền bùng nổ rõ ràng hơn."
+                        decision_icon = "🟡"
+
+                    item_str = (
+                        f"\n**{symbol} -> Giá: {price}**\n"
+                        f"+ 🌐 Đa khung: Tuần (1W): {trend_1w} | Ngày (1D): {status_1d}\n"
+                        f"+ 📊 Kỹ thuật: RSI: {rsi} | StochK: {stoch_k} | Banker: {banker}%\n"
+                        f"+ 📰 Tin tức: **{sentiment}** ({news_title[:45]}...)\n"
+                        f"+ 📈 Mô phỏng: Xác suất tăng giá 5 phiên tới: {sim_prob}%\n"
+                        f"+ {decision_icon} Nhận định: {verdict}\n"
+                        f"---"
+                    )
+                    signals_found.append(item_str)
+                time.sleep(3)
+                
+            except Exception as e:
+                print(f"⚠️ Bỏ qua {symbol}: {e}")
+                time.sleep(3)
+                
+        # CHỈ GỬI TELEGRAM KHI CÓ TÍN HIỆU THEO ĐÚNG YÊU CẦU TÍNH GỌN
+        if len(signals_found) > 0:
+            msg_summary = "".join(signals_found)
+            send_telegram(msg_summary)
+            print(f"✅ Đã gửi tín hiệu cụm {group_number} về Telegram.")
+        else:
+            print(f"💤 Cụm {group_number} không có tín hiệu.")
+
+        start_idx += BATCH_SIZE
+        group_number += 1
+
+        if start_idx < total_symbols:
+            time.sleep(DELAY_BETWEEN_BATCHES)
+
+    print("\n🏁 HỆ THỐNG HOÀN THÀNH QUÉT TOÀN BỘ 200 MÃ!")
